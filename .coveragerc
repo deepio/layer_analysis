@@ -1,0 +1,6 @@
+[run]
+source_pkgs =
+  layer_analysis
+
+[report]
+omit = env/*

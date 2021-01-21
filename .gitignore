@@ -1,0 +1,14 @@
+env
+dist
+logs
+tb_logs
+
+*.pyc
+*.hdf5
+*.log
+*.out
+.coverage
+.python-version
+.DS_Store
+main.py
+test.py
