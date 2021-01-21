@@ -59,18 +59,15 @@ def getTrain(input_image, gt, patch_height, patch_width, max_samples_per_class=l
     X_train = {}
     Y_train = {}
 
-    # Calculate the ratio per label
     ratio = {}
     count = {}
+    X_train = []
+    Y_train = []
 
-    for label in gt:
-        # Initialize data lists
-        X_train[label] = []
-        Y_train[label] = []
-
-        count[label] = (gt[label] == 1).sum()
-        samples_per_class = min(count[label], max_samples_per_class)
-        ratio[label] = factor * (samples_per_class/float(count[label]))
+    count = (gt == 1).sum()
+    samples_per_class = min(count, max_samples_per_class)
+    ratio = factor * (samples_per_class/float(count))
+    
 
     # Get samples according to the ratio per label
     height, width, _ = input_image.shape
@@ -85,39 +82,35 @@ def getTrain(input_image, gt, patch_height, patch_width, max_samples_per_class=l
 
             # get 1 for every factor-ish
             if rd.random() < 1./factor:
+  
+                if gt[row][col] == 1:
 
-                for label in gt:
-                    if gt[label][row][col] == 1:    
+                    if rd.random() < ratio: # Take samples according to its ratio
 
+                        from_x = row-(patch_height//2)
+                        from_y = col-(patch_width//2)
 
-                        if rd.random() < ratio[label]: # Take samples according to its ratio
-                            from_x = row-(patch_height//2)
-                            from_y = col-(patch_width//2)
+                        sample_x = input_image[from_x:from_x+patch_height,from_y:from_y+patch_width]
+                        sample_y = gt[from_x:from_x+patch_height,from_y:from_y+patch_width]
 
-                            sample_x = input_image[from_x:from_x+patch_height,from_y:from_y+patch_width]
-                            sample_y = gt[label][from_x:from_x+patch_height,from_y:from_y+patch_width]
-
-                            X_train[label].append(sample_x)
-                            Y_train[label].append(sample_y)
-
-    # Manage different ordering 
-    for label in gt:
-        X_train[label] = np.asarray(X_train[label]).reshape(len(X_train[label]), patch_height, patch_width, 3)
-        Y_train[label] = np.expand_dims(np.asarray(Y_train[label]), axis=-1)
+                        X_train.append(sample_x)
+                        Y_train.append(sample_y)
+    
+    X_train = np.asarray(X_train).reshape(len(X_train), patch_height, patch_width, 3)
+    Y_train = np.expand_dims(np.asarray(Y_train), axis=-1)
 
     return [X_train, Y_train]
 
 
-
 def train_msae(input_image, gt, height, width, output_path, epochs=la._EPOCHS_, max_samples_per_class=la._SAMPLES_PER_CLASS_, batch_size=la._BATCH_SIZE_, validation_split=la._VALIDATION_SPLIT_):
 
-    # Create ground_truth
-    [X_train, Y_train] = getTrain(input_image, gt, height, width, max_samples_per_class)
-
     # Training loop
-    for label in Y_train:
+    for label in gt:
+
+        [X_train, Y_train] = getTrain(input_image, gt[label], height, width, max_samples_per_class)
+
         print('Training created with:')
-        print("\t{} samples of {}".format(len(Y_train[label]),label))
+        print("\t{} samples of {}".format(len(Y_train),label))
         print('Training a new model for ' + str(label))
         model = get_sae(
             height=height,
@@ -133,8 +126,8 @@ def train_msae(input_image, gt, height, width, output_path, epochs=la._EPOCHS_, 
         # Training stage
         try:
             model.fit(
-                x=X_train[label],
-                y=Y_train[label],
+                x=X_train,
+                y=Y_train,
                 verbose=2,
                 batch_size=batch_size,
                 validation_split=validation_split,
