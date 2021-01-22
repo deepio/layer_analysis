@@ -40,8 +40,8 @@ def test_training():
   status = train_msae(
     input_image=input_image,
     gt=ground_truth,
-    height=16,
-    width=16,
+    patch_height=16,
+    patch_width=16,
     output_path=output_path,
     epochs=1,
     max_samples_per_class=50,

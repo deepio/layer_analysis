@@ -13,6 +13,7 @@ import keras
 import tensorflow as tf
 
 import layer_analysis as la
+from memory_profiler import profile
 
 
 def get_sae(height, width, pretrained_weights = None):
@@ -52,7 +53,8 @@ def get_sae(height, width, pretrained_weights = None):
 
     return model
 
-
+fp=open(f"memory_profiler.get_train.{la.__version__}.log", "a")
+@profile(stream=fp)
 def getTrain(input_image, gt, patch_height, patch_width, max_samples_per_class=la._SAMPLES_PER_CLASS_, factor=la._SPEED_FACTOR_):
     # factor = 100. 
 
@@ -61,8 +63,8 @@ def getTrain(input_image, gt, patch_height, patch_width, max_samples_per_class=l
 
     ratio = {}
     count = {}
-    X_train = []
-    Y_train = []
+    X_train = None
+    Y_train = None
 
     count = (gt == 1).sum()
     samples_per_class = min(count, max_samples_per_class)
@@ -71,7 +73,6 @@ def getTrain(input_image, gt, patch_height, patch_width, max_samples_per_class=l
 
     # Get samples according to the ratio per label
     height, width, _ = input_image.shape
-    # compare the height/width of image with patch size.
 
     # pre-process entire image.
     # 255 turns into 0, 0 turns to 1. All ints are between 0.0 and 1.0.
@@ -91,30 +92,36 @@ def getTrain(input_image, gt, patch_height, patch_width, max_samples_per_class=l
                         from_y = col-(patch_width//2)
 
                         sample_x = input_image[from_x:from_x+patch_height,from_y:from_y+patch_width]
-                        sample_y = gt[from_x:from_x+patch_height,from_y:from_y+patch_width]
+                        sample_y = np.expand_dims(gt[from_x:from_x+patch_height,from_y:from_y+patch_width], axis=-1)
 
-                        X_train.append(sample_x)
-                        Y_train.append(sample_y)
-    
-    X_train = np.asarray(X_train).reshape(len(X_train), patch_height, patch_width, 3)
-    Y_train = np.expand_dims(np.asarray(Y_train), axis=-1)
+                        # Empty in the first iteration
+                        if X_train is None:
+                          X_train = np.asarray([sample_x])
+                          Y_train = np.asarray([sample_y])
+                        # Combine without flattening in every other iteration
+                        else:
+                          X_train = np.concatenate((X_train, [sample_x]))
+                          Y_train = np.concatenate((Y_train, [sample_y]))
 
-    return [X_train, Y_train]
+                        yield X_train, Y_train
 
 
-def train_msae(input_image, gt, height, width, output_path, epochs=la._EPOCHS_, max_samples_per_class=la._SAMPLES_PER_CLASS_, batch_size=la._BATCH_SIZE_, validation_split=la._VALIDATION_SPLIT_):
+fp=open(f"memory_profiler.train_msae.{la.__version__}.log", "a")
+@profile(stream=fp)
+def train_msae(input_image, gt, patch_height, patch_width, output_path, epochs=la._EPOCHS_, max_samples_per_class=la._SAMPLES_PER_CLASS_, batch_size=la._BATCH_SIZE_, validation_split=la._VALIDATION_SPLIT_):
+
+    height, width, _ = input_image.shape
+    # total_patches_estimation = (height - (patch_height*2)) * (width - (patch_width*2)) / la._SPEED_FACTOR_
+    total_patches_estimation = 50
 
     # Training loop
     for label in gt:
 
-        [X_train, Y_train] = getTrain(input_image, gt[label], height, width, max_samples_per_class)
-
         print('Training created with:')
-        print("\t{} samples of {}".format(len(Y_train),label))
         print('Training a new model for ' + str(label))
         model = get_sae(
-            height=height,
-            width=width
+            height=patch_height,
+            width=patch_width,
         )
 
         model.summary()
@@ -123,16 +130,10 @@ def train_msae(input_image, gt, height, width, output_path, epochs=la._EPOCHS_, 
             EarlyStopping(monitor='val_accuracy', patience=3, verbose=0, mode='max')
         ]
 
-        # Training stage
-        try:
-            model.fit(
-                x=X_train,
-                y=Y_train,
-                verbose=2,
-                batch_size=batch_size,
-                validation_split=validation_split,
-                callbacks=callbacks_list,
-                epochs=epochs
-            )
-        except ValueError:
-            raise la.utils.InvalidPatchSizeParameter from None
+        model.fit_generator(
+            generator=getTrain(input_image, gt[label], patch_height, patch_width, max_samples_per_class),
+            verbose=2,
+            callbacks=callbacks_list,
+            epochs=epochs,
+            steps_per_epoch=total_patches_estimation,
+        )
